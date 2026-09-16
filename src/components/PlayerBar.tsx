@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, FileMusic, Music2, Pause, Play, Repeat, Repeat1 } from 'lucide-react'
-import type { Track } from '../services/driveService'
+import type { Track } from '../services/localMusicService'
 
 export type RepeatMode = 'off' | 'all' | 'one'
 

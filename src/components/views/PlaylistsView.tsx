@@ -1,17 +1,18 @@
 import { useState } from 'react'
 import { ListMusic, ArrowLeft, Music2 } from 'lucide-react'
-import { parseM3U8File, type DriveFile, type Track } from '../../services/driveService'
+import { parsePlaylistFile, type LocalFile, type Track } from '../../services/localMusicService'
 
 interface PlaylistsViewProps {
-  playlists: DriveFile[]
+  playlists: LocalFile[]
   tracks: Track[]
   onPlayTrack: (track: Track, queue: Track[]) => void
 }
 
 export function PlaylistsView({ playlists, tracks, onPlayTrack }: PlaylistsViewProps) {
-  const [selectedPlaylist, setSelectedPlaylist] = useState<DriveFile | null>(null)
+  const [selectedPlaylist, setSelectedPlaylist] = useState<LocalFile | null>(null)
   const [playlistTrackNames, setPlaylistTrackNames] = useState<string[]>([])
   const [loadingPlaylist, setLoadingPlaylist] = useState(false)
+  const [playlistError, setPlaylistError] = useState<string | null>(null)
 
   const normalizeEntry = (value: string) => {
     let decoded = value.trim()
@@ -38,14 +39,17 @@ export function PlaylistsView({ playlists, tracks, onPlayTrack }: PlaylistsViewP
     })
   }
 
-  const handleOpenPlaylist = async (pl: DriveFile) => {
+  const handleOpenPlaylist = async (pl: LocalFile) => {
     setSelectedPlaylist(pl)
     setLoadingPlaylist(true)
+    setPlaylistError(null)
     try {
-      const names = await parseM3U8File(pl.id, pl.resourceKey)
+      const names = await parsePlaylistFile(pl.url)
       setPlaylistTrackNames(names)
     } catch (err) {
       console.error(err)
+      setPlaylistTrackNames([])
+      setPlaylistError(err instanceof Error ? err.message : 'Unable to parse this playlist.')
     } finally {
       setLoadingPlaylist(false)
     }
@@ -80,7 +84,9 @@ export function PlaylistsView({ playlists, tracks, onPlayTrack }: PlaylistsViewP
         </div>
 
         {loadingPlaylist ? (
-          <p className="text-neutral-500">Parsing .m3u8 playlist file...</p>
+          <p className="text-neutral-500">Parsing playlist file...</p>
+        ) : playlistError ? (
+          <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{playlistError}</p>
         ) : (
           <div className="divide-y divide-neutral-800">
             {playlistEntries.map((name, index) => {
@@ -94,7 +100,7 @@ export function PlaylistsView({ playlists, tracks, onPlayTrack }: PlaylistsViewP
                     matchedTrack ? 'hover:bg-neutral-900 cursor-pointer' : 'opacity-60 cursor-not-allowed'
                   }`}
                 >
-                  <div className="flex items-center gap-4">
+                  <div className="flex min-w-0 items-center gap-4 text-left">
                     <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-neutral-800 text-red-500">
                       {matchedTrack?.coverUrl ? (
                         <img src={matchedTrack.coverUrl} alt={`${matchedTrack.title} cover`} className="h-full w-full object-cover" />
@@ -102,10 +108,10 @@ export function PlaylistsView({ playlists, tracks, onPlayTrack }: PlaylistsViewP
                         <Music2 className="m-2 h-6 w-6" />
                       )}
                     </div>
-                    <div>
-                      <p className="font-medium text-neutral-200">{matchedTrack ? matchedTrack.title : name}</p>
-                      <p className="text-xs text-neutral-500">
-                        {matchedTrack ? matchedTrack.artist : 'File missing from Drive folder'}
+                    <div className="min-w-0 flex-1 text-left">
+                      <p className="truncate text-left font-medium text-neutral-200">{matchedTrack ? matchedTrack.title : name}</p>
+                      <p className="truncate text-left text-xs text-neutral-500">
+                        {matchedTrack ? matchedTrack.artist : 'File missing from music folder'}
                       </p>
                     </div>
                   </div>
@@ -132,7 +138,7 @@ export function PlaylistsView({ playlists, tracks, onPlayTrack }: PlaylistsViewP
               <ListMusic className="h-6 w-6" />
             </div>
             <h3 className="font-semibold text-neutral-100 truncate">{pl.name}</h3>
-            <p className="text-xs text-neutral-500 mt-1">Parsed .m3u8 File</p>
+            <p className="text-xs text-neutral-500 mt-1">M3U / M3U8 playlist</p>
           </div>
         ))}
       </div>

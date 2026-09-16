@@ -1,14 +1,14 @@
 import { useEffect, useState, useRef } from 'react'
 import { Howl } from 'howler'
 import {
-  fetchDriveContents,
-  fetchDriveText,
+  fetchLocalContents,
+  fetchLocalText,
   fetchAudioBlobUrl,
   loadTrackMetadata,
   prepareTrackForPlayback,
   type Track,
-  type DriveFile,
-} from './services/driveService'
+  type LocalFile,
+} from './services/localMusicService'
 
 import { Sidebar, type TabType } from './components/Sidebar'
 import { PlayerBar, type RepeatMode } from './components/PlayerBar'
@@ -21,8 +21,10 @@ import { fetchAutoLyrics, parseLrc, searchLrclib, type LrclibResult, type LyricL
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('library')
+  const [selectedArtist, setSelectedArtist] = useState<string | null>(null)
+  const [selectedAlbum, setSelectedAlbum] = useState<string | null>(null)
   const [tracks, setTracks] = useState<Track[]>([])
-  const [playlists, setPlaylists] = useState<DriveFile[]>([])
+  const [playlists, setPlaylists] = useState<LocalFile[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -36,7 +38,7 @@ export default function App() {
   const [bufferedTime, setBufferedTime] = useState(0)
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('off')
   const [lyricsDelays, setLyricsDelays] = useState<Record<string, number>>({})
-  const [lyricFiles, setLyricFiles] = useState<DriveFile[]>([])
+  const [lyricFiles, setLyricFiles] = useState<LocalFile[]>([])
   const [showNowPlaying, setShowNowPlaying] = useState(false)
   const [loadingTrackId, setLoadingTrackId] = useState<string | null>(null)
   const [playbackError, setPlaybackError] = useState<string | null>(null)
@@ -44,33 +46,33 @@ export default function App() {
   const currentTrackRef = useRef<Track | null>(null)
   const tracksRef = useRef<Track[]>([])
   const queueRef = useRef<Track[]>([])
+  const metadataAbortControllerRef = useRef<AbortController | null>(null)
   const lyricRequestRef = useRef(0)
   const repeatModeRef = useRef<RepeatMode>('off')
   useEffect(() => {
     async function init() {
       try {
-        const contents = await fetchDriveContents()
+        const contents = await fetchLocalContents()
+        const metadataAbortController = new AbortController()
+        metadataAbortControllerRef.current = metadataAbortController
         setTracks(contents.tracks)
         setPlaylists(contents.playlists)
         setLyricFiles(contents.lyrics)
         setLoading(false)
 
-        for (let index = 0; index < contents.tracks.length; index += 4) {
-          const batch = contents.tracks.slice(index, index + 4)
-          const hydratedTracks = await Promise.all(batch.map((track) => loadTrackMetadata(track)))
-          setTracks((previous) => previous.map((track) => {
-            const hydratedTrack = hydratedTracks.find((item) => item.id === track.id)
-            return hydratedTrack ? { ...track, ...hydratedTrack } : track
-          }))
-        }
+        const hydratedTracks = await Promise.all(
+          contents.tracks.map((track) => loadTrackMetadata(track, metadataAbortController.signal)),
+        )
+        if (!metadataAbortController.signal.aborted) setTracks(hydratedTracks)
       } catch (err) {
-        console.error('Failed to load drive contents:', err)
-        setLoadError(err instanceof Error ? err.message : 'Unable to load Google Drive contents.')
+        console.error('Failed to load local music:', err)
+        setLoadError(err instanceof Error ? err.message : 'Unable to load local music.')
       } finally {
         setLoading(false)
       }
     }
     init()
+    return () => metadataAbortControllerRef.current?.abort()
   }, [])
 
   useEffect(() => {
@@ -120,10 +122,10 @@ export default function App() {
         return trackNames.some((name) => lyricName === name || lyricName.includes(name) || name.includes(lyricName))
       })
       if (lyricFile) {
-        const driveLyrics = await fetchDriveText(lyricFile.id, lyricFile.resourceKey)
+        const localLyrics = await fetchLocalText(lyricFile.url)
         if (requestId !== lyricRequestRef.current) return
-        setLyrics(driveLyrics)
-        setLyricLines(parseLrc(driveLyrics))
+        setLyrics(localLyrics)
+        setLyricLines(parseLrc(localLyrics))
       }
     } catch (err) {
       console.warn('Lyrics lookup failed:', err)
@@ -133,6 +135,8 @@ export default function App() {
   }
 
   const handlePlayTrack = async (track: Track, queue: Track[] = tracksRef.current) => {
+    metadataAbortControllerRef.current?.abort()
+    metadataAbortControllerRef.current = null
     queueRef.current = queue
     if (currentTrackRef.current?.id === track.id && soundRef.current) {
       if (isPlaying) {
@@ -190,7 +194,7 @@ export default function App() {
             return
           }
           fallbackAttempted = true
-          void fetchAudioBlobUrl(preparedTrack.id, preparedTrack.resourceKey).then((blobUrl) => {
+          void fetchAudioBlobUrl(preparedTrack.streamUrl || '').then((blobUrl) => {
             sound.unload()
             const fallbackSound = new Howl({
               src: [blobUrl],
@@ -216,7 +220,7 @@ export default function App() {
       }).catch((err) => console.warn('Background metadata lookup failed:', err))
     } catch (err) {
       console.error('Playback error:', err)
-      setPlaybackError(err instanceof Error ? err.message : 'Unable to play this song. Check your Google Drive configuration.')
+      setPlaybackError(err instanceof Error ? err.message : 'Unable to play this local song.')
     } finally {
       setLoadingTrackId(null)
     }
@@ -281,17 +285,24 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col overflow-x-hidden bg-neutral-950 font-sans text-neutral-100 antialiased select-none md:h-screen md:flex-row">
-      <Sidebar activeTab={activeTab} onSelectTab={setActiveTab} />
+    <div className="flex h-screen flex-col overflow-x-hidden bg-neutral-950 font-sans text-neutral-100 antialiased select-none md:flex-row">
+      <Sidebar
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        tracks={tracks}
+        onPlayTrack={handlePlayTrack}
+        onOpenArtist={(artist) => { setSelectedArtist(artist); setSelectedAlbum(null); setActiveTab('artists') }}
+        onOpenAlbum={(album) => { setSelectedAlbum(album); setSelectedArtist(null); setActiveTab('albums') }}
+      />
 
-      <main className="min-w-0 flex-1 overflow-y-auto p-4 pb-24 sm:p-6 sm:pb-28 md:p-8 md:pb-32">
+      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 pb-24 sm:p-6 sm:pb-28 md:p-8 md:pb-32">
         {loading ? (
-          <p className="text-neutral-500">Scanning Google Drive...</p>
+          <p className="text-neutral-500">Loading local music...</p>
         ) : loadError ? (
           <div className="max-w-xl rounded-xl border border-red-500/30 bg-red-500/10 p-5 text-left">
             <h1 className="text-lg font-semibold text-red-200">Could not load your library</h1>
             <p className="mt-2 text-sm text-red-300">{loadError}</p>
-            <p className="mt-3 text-sm text-neutral-400">Add VITE_GOOGLE_API_KEY to your environment and make sure the Drive folder is accessible with that key.</p>
+            <p className="mt-3 text-sm text-neutral-400">Add your music files to public/music and update public/music/catalog.json.</p>
           </div>
         ) : (
           <>
@@ -309,10 +320,10 @@ export default function App() {
               <PlaylistsView playlists={playlists} tracks={tracks} onPlayTrack={handlePlayTrack} />
             )}
             {activeTab === 'artists' && (
-              <ArtistsView tracks={tracks} />
+              <ArtistsView tracks={tracks} onPlayTrack={handlePlayTrack} selectedArtist={selectedArtist} onSelectedArtistChange={setSelectedArtist} />
             )}
             {activeTab === 'albums' && (
-              <AlbumsView tracks={tracks} />
+              <AlbumsView tracks={tracks} onPlayTrack={handlePlayTrack} selectedAlbum={selectedAlbum} onSelectedAlbumChange={setSelectedAlbum} />
             )}
           </>
         )}
@@ -352,6 +363,8 @@ export default function App() {
           onTogglePlayPause={togglePlayPause}
           onPrevious={() => playAdjacent(-1)}
           onNext={() => playAdjacent(1)}
+          repeatMode={repeatMode}
+          onToggleRepeat={toggleRepeat}
         />
       )}
     </div>

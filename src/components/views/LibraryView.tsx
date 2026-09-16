@@ -1,5 +1,5 @@
 import { LoaderCircle, Play, Pause } from 'lucide-react'
-import type { Track } from '../../services/driveService'
+import type { Track } from '../../services/localMusicService'
 
 interface LibraryViewProps {
   tracks: Track[]
@@ -39,7 +39,7 @@ export function LibraryView({ tracks, currentTrack, isPlaying, onPlayTrack, load
                 <p className={`font-medium ${currentTrack?.id === track.id ? 'text-red-500' : 'text-neutral-200'}`}>
                   {track.title || track.name}
                 </p>
-                <p className="text-xs text-neutral-500">{track.artist || 'Google Drive Audio'}</p>
+                <p className="text-xs text-neutral-500">{track.artist || 'Local Audio'}</p>
               </div>
             </div>
           </button>

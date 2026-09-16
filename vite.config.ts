@@ -5,20 +5,4 @@ import tailwindcss from '@tailwindcss/vite'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  server: {
-    proxy: {
-      '/drive-api': {
-        target: 'https://www.googleapis.com',
-        changeOrigin: true,
-        followRedirects: true,
-        rewrite: (path) => path.replace(/^\/drive-api/, ''),
-      },
-      '/drive-download': {
-        target: 'https://drive.google.com',
-        changeOrigin: true,
-        followRedirects: true,
-        rewrite: (path) => path.replace(/^\/drive-download/, ''),
-      },
-    },
-  },
 })
